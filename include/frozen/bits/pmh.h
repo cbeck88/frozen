@@ -57,6 +57,7 @@ constexpr bool all_different_from(cvector<T, N> & data, T & a) {
 // Represents the two hash tables created by pmh algorithm
 template <std::size_t M, class Hasher>
 struct pmh_tables {
+  uint64_t first_seed_;
   std::array<int64_t, M> first_table_;
   std::array<uint64_t, M> second_table_;
   Hasher hash_;
@@ -65,11 +66,31 @@ struct pmh_tables {
   // Always returns a valid index, must use KeyEqual test after to confirm.
   template <typename KeyType>
   constexpr uint64_t lookup(const KeyType & key) const {
-    auto const d = first_table_[hash_(key) % M];
+    auto const d = first_table_[hash_(key, first_seed_) % M];
     auto const index = (d < 0) ? (-d - 1) : (hash_(key, d) % M);
     return second_table_[index];
   }
 };
+
+// Check if sum of bucket_size^2, for the buckets of size at least 2, exceeds limit
+template <std::size_t M>
+constexpr bool bucket_score_is_good(const cvector<bucket<M>, M> & buckets, uint64_t limit) {
+  uint64_t sum = 0;
+
+  for (unsigned i = 0; i < M; ++i) {
+    auto bsize = buckets[i].size();
+    if (bsize > 1) {
+      uint64_t temp = bsize;
+      if (temp > limit) { return false; }
+      temp *= bsize;
+      if (temp > limit) { return false; }
+
+      sum += temp;
+      if (sum > limit) { return false; }
+    }
+  }
+  return true;
+}
 
 template <class Item, std::size_t N, std::size_t M, class Hash, class Key>
 pmh_tables<M, Hash> constexpr make_pmh_tables(const std::array<Item, N> &
@@ -77,17 +98,30 @@ pmh_tables<M, Hash> constexpr make_pmh_tables(const std::array<Item, N> &
                                                            Hash const &hash,
                                                            Key const &key) {
   // Step 1: Place all of the keys into buckets
-  cvector<bucket<M>, M> buckets;
-  cvector<uint64_t, M> values;
-  cvector<int64_t, M> G;
+  uint64_t first_seed = 0;
+  using buckets_t = cvector<bucket<M>, M>;
+  buckets_t buckets;
 
   auto *it = &std::get<0>(items);
 
-  for (std::size_t i = 0; i < N; ++i)
-    buckets[hash(key(it[i])) % M].push_back(1 + i);
+  // Try a few times to get a good initial hash
+  // These constants are essentially arbitrary
+  constexpr uint64_t iteration_limit = 1000;
+  constexpr uint64_t goal_factor = 100;
+
+  do {
+    first_seed++;
+    buckets = buckets_t{};
+
+    for (std::size_t i = 0; i < N; ++i)
+      buckets[hash(key(it[i]), first_seed) % M].push_back(1 + i);
+  } while(first_seed < iteration_limit && !bucket_score_is_good(buckets, goal_factor * N));
 
   // Step 2: Sort the buckets and process the ones with the most items first.
   bits::quicksort(buckets.begin(), buckets.begin() + M - 1, bucket_size_compare{});
+
+  cvector<uint64_t, M> values;
+  cvector<int64_t, M> G;
 
   std::size_t b = 0;
   for (; b < M; ++b) {
@@ -113,7 +147,7 @@ pmh_tables<M, Hash> constexpr make_pmh_tables(const std::array<Item, N> &
       slots.push_back(slot);
     }
 
-    G[hash(key(it[bucket[0] - 1])) % M] = d;
+    G[hash(key(it[bucket[0] - 1]), first_seed) % M] = d;
     for (std::size_t i = 0; i < bsize; ++i)
       values[slots[i]] = bucket[i];
   }
@@ -135,14 +169,14 @@ pmh_tables<M, Hash> constexpr make_pmh_tables(const std::array<Item, N> &
     freelist.pop_back();
     // We subtract one to ensure it's negative even if the zeroeth slot was
     // used.
-    G[hash(key(it[bucket[0] - 1])) % M] = -slot - 1;
+    G[hash(key(it[bucket[0] - 1]), first_seed) % M] = -slot - 1;
     values[slot] = bucket[0];
   }
   for (std::size_t i = 0; i < M; ++i)
     if (values[i])
       values[i]--;
 
-  return {G.to_array(), values.to_array(), hash};
+  return {first_seed, G.to_array(), values.to_array(), hash};
 }
 
 } // namespace bits
