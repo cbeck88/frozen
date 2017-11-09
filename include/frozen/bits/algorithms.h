@@ -84,6 +84,8 @@ constexpr auto min_element(Iter begin, const Iter end,
   return result;
 }
 
+/** Swap **/
+
 template <class T>
 constexpr void cswap(T &a, T &b) {
   auto tmp = a;
@@ -102,6 +104,8 @@ constexpr void cswap(std::tuple<Tys...> &a, std::tuple<Tys...> &b) {
   cswap(a, b, std::make_index_sequence<sizeof...(Tys)>());
 }
 
+/** Partition **/
+
 template <typename Iterator, class Compare>
 constexpr Iterator partition(Iterator left, Iterator right, Compare const &compare) {
   auto pivot = left + (right - left) / 2;
@@ -116,6 +120,10 @@ constexpr Iterator partition(Iterator left, Iterator right, Compare const &compa
   cswap(*right, *left);
   return left;
 }
+
+/** Quicksort **/
+
+/*
 
 template <typename Iterator, class Compare>
 constexpr void quicksort(Iterator left, Iterator right, Compare const &compare) {
@@ -133,6 +141,112 @@ constexpr std::array<T, N> quicksort(std::array<T, N> const &array,
   quicksort(&std::get<0>(res), &std::get<N - 1>(res), compare);
   return res;
 }
+
+*/
+
+/** Mergesort **/
+
+// Make an array which is one larger
+template <typename T, std::size_t N, std::size_t... Is>
+constexpr auto cons_impl(const T & first, const std::array<T, N> & last, std::index_sequence<Is...>)
+    -> std::array<T, N+1> {
+    return {{ first, last[Is]... }};
+}
+
+template <typename T, std::size_t N>
+constexpr auto cons(const T & first, const std::array<T, N> & last)
+    -> std::array<T, N+1> {
+    return cons_impl(first, last, std::make_index_sequence<N>());
+}
+
+// Take the trailing part of an array
+template <typename T, std::size_t N, std::size_t ... Is>
+constexpr auto cdr_impl(const std::array<T, N> & s, std::index_sequence<Is...>)
+    -> std::array<T, sizeof...(Is)> {
+    return {{s[1 + Is]...}};
+}
+
+template <typename T, std::size_t N>
+constexpr auto cdr(std::array<T, N> s) -> std::array<T, N - 1> {
+    return cdr_impl(s, std::make_index_sequence<N - 1>());
+}
+
+// Make an array slice
+template <typename T, std::size_t N, std::size_t L, std::size_t ... Is>
+constexpr auto slice_impl(const std::array<T, N> & a,
+                          std::integral_constant<size_t, L>,
+                          std::index_sequence<Is...>) -> std::array<T, sizeof...(Is)> {
+    return {{ a[L + Is]... }};
+}
+
+template <typename T, std::size_t N, std::size_t L, std::size_t R>
+constexpr auto slice(const std::array<T, N> & a,
+                     std::integral_constant<std::size_t, L> s,
+                     std::integral_constant<std::size_t, R>) {
+    return slice_impl(a, s, std::make_index_sequence<R - L>());
+}
+
+// Merge two sorted std::arrays
+
+template <typename T, class Compare>
+constexpr auto merge_impl( const std::array<T, 0> &, const std::array<T, 0> &, Compare const &)
+  -> std::array<T, 0> {
+    return {};
+}
+
+template <typename T, std::size_t N1, class Compare>
+constexpr auto merge_impl( const std::array<T, N1> & s, const std::array<T, 0> &, Compare const &)
+    -> std::array<T, N1> {
+    return s;
+}
+
+template <typename T, std::size_t N2, class Compare>
+constexpr auto merge_impl( const std::array<T, 0> &, const std::array<T, N2> & s, Compare const &)
+    -> std::array<T, N2> {
+    return s;
+}
+
+template <typename T, std::size_t N1, std::size_t N2, class Compare>
+constexpr auto merge_impl( const std::array<T, N1> & a1, const std::array<T, N2> & a2, Compare const & compare) 
+  -> std::array<T, N1 + N2> {
+    return compare(a1[0], a2[0]) ?
+            cons(a1[0], merge_impl(cdr(a1), a2, compare)) :
+            cons(a2[0], merge_impl(a1, cdr(a2), compare));
+}
+
+template <typename T, std::size_t N1, std::size_t N2, class Compare>
+constexpr auto merge(const std::array<T, N1> & a1, const std::array<T, N2> & a2, Compare const & compare)
+    -> std::array<T, N1 + N2> {
+    return merge_impl(a1, a2, compare/*, std::make_index_sequence<N1 + N2>()*/);
+}
+
+
+
+template <class T, class Compare>
+constexpr auto mergesort(std::array<T, 0>, Compare const &) -> std::array<T, 0> {
+    return {};
+}
+
+template <class T, class Compare>
+constexpr auto mergesort(std::array<T, 1> s, Compare const &) -> std::array<T, 1> {
+    return s;
+}
+
+template <class T, std::size_t N, class Compare>
+constexpr auto mergesort(const std::array<T, N> & s, Compare const & compare)
+    -> std::array<T, N> {
+    return merge(mergesort(slice(s,
+                                 std::integral_constant<std::size_t, 0>{},
+                                 std::integral_constant<std::size_t, N/2 + N % 2>{}),
+                           compare),
+                 mergesort(slice(s,
+                                 std::integral_constant<std::size_t, N/2 + N % 2>{},
+                                 std::integral_constant<std::size_t, N>{}),
+                           compare),
+                 compare);
+}
+
+/** Search **/
 
 template <class T, class Compare> struct LowerBound {
   T const &value_;

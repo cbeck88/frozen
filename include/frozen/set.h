@@ -57,7 +57,7 @@ public:
 
   constexpr set(container_type keys, Compare const & comp)
       : compare_{comp}
-      , keys_(bits::quicksort(container_type{keys}, compare_)) {}
+      , keys_(bits::mergesort(container_type{keys}, compare_)) {}
 
   explicit constexpr set(container_type keys)
       : set{keys, Compare{}} {}
