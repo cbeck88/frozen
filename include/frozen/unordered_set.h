@@ -124,7 +124,7 @@ public:
   constexpr std::size_t max_bucket_count() const { return storage_size; }
 
   /* observers*/
-  constexpr hasher hash_function() const { return tables_.hash_; }
+  constexpr hasher hash_function() const { return tables_.get_hasher(); }
   constexpr key_equal key_eq() const { return equal_; }
 
 private:

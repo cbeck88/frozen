@@ -56,19 +56,28 @@ constexpr bool all_different_from(cvector<T, N> & data, T & a) {
 
 // Represents the two hash tables created by pmh algorithm
 template <std::size_t M, class Hasher>
-struct pmh_tables {
+class pmh_tables : Hasher { // empty base optimization
   std::array<int64_t, M> first_table_;
   std::array<uint64_t, M> second_table_;
-  Hasher hash_;
+
+public:
+  constexpr pmh_tables(std::array<int64_t, M> f, std::array<uint64_t, M> s, Hasher h)
+    : Hasher(h)
+    , first_table_(f)
+    , second_table_(s)
+  {}
 
   // Looks up a given key, to find its expected index in std::array<Item, N>
   // Always returns a valid index, must use KeyEqual test after to confirm.
   template <typename KeyType>
   constexpr uint64_t lookup(const KeyType & key) const {
-    auto const d = first_table_[hash_(key) % M];
-    auto const index = (d < 0) ? (-d - 1) : (hash_(key, d) % M);
+    const Hasher & hash = *this;
+    auto const d = first_table_[hash(key) % M];
+    auto const index = (d < 0) ? (-d - 1) : (hash(key, d) % M);
     return second_table_[index];
   }
+
+  constexpr Hasher get_hasher() const { return *this; }
 };
 
 template <std::size_t M, class Item, std::size_t N, class Hash, class Key>
