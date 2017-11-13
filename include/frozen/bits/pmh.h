@@ -54,14 +54,21 @@ constexpr bool all_different_from(cvector<T, N> & data, T & a) {
   return true;
 }
 
+// Represents either an index into data items, or a seed for use in
+// next hash table. Bool keeps track of which
+struct maybe_seed {
+  bool is_seed;
+  uint64_t value;
+};
+
 // Represents the two hash tables created by pmh algorithm
 template <std::size_t M, class Hasher>
 class pmh_tables : Hasher { // empty base optimization
-  std::array<int64_t, M> first_table_;
+  std::array<maybe_seed, M> first_table_;
   std::array<uint64_t, M> second_table_;
 
 public:
-  constexpr pmh_tables(std::array<int64_t, M> f, std::array<uint64_t, M> s, Hasher h)
+  constexpr pmh_tables(std::array<maybe_seed, M> f, std::array<uint64_t, M> s, Hasher h)
     : Hasher(h)
     , first_table_(f)
     , second_table_(s)
@@ -72,9 +79,9 @@ public:
   template <typename KeyType>
   constexpr uint64_t lookup(const KeyType & key) const {
     const Hasher & hash = *this;
-    auto const d = first_table_[hash(key) % M];
-    auto const index = (d < 0) ? (-d - 1) : (hash(key, d) % M);
-    return second_table_[index];
+    auto const & d = first_table_[hash(key) % M];
+    if (!d.is_seed) { return d.value; }
+    return second_table_[hash(key, d.value) % M];
   }
 
   constexpr Hasher get_hasher() const { return *this; }
@@ -88,7 +95,7 @@ pmh_tables<M, Hash> constexpr make_pmh_tables(const std::array<Item, N> &
   // Step 1: Place all of the keys into buckets
   cvector<bucket<M>, M> buckets;
   cvector<uint64_t, M> values;
-  cvector<int64_t, M> G;
+  cvector<maybe_seed, M> G;
 
   auto *it = &std::get<0>(items);
 
@@ -102,51 +109,32 @@ pmh_tables<M, Hash> constexpr make_pmh_tables(const std::array<Item, N> &
   for (; b < M; ++b) {
     auto &bucket = buckets[b];
     auto const bsize = bucket.size();
-    if (bsize <= 1)
-      break;
+    if (bsize > 1) {
+      // Repeatedly try different values of d until we find a hash function
+      // that places all items in the bucket into free slots
+      std::size_t d = 1;
+      cvector<std::size_t, M> slots;
 
-    // Repeatedly try different values of d until we find a hash function
-    // that places all items in the bucket into free slots
-    std::size_t d = 1;
-    cvector<std::size_t, M> slots;
+      while (slots.size() < bsize) {
+        auto slot = hash(key(it[bucket[slots.size()] - 1]), d) % M;
 
-    while (slots.size() < bsize) {
-      auto slot = hash(key(it[bucket[slots.size()] - 1]), d) % M;
+        if (values[slot] != 0 || !all_different_from(slots, slot)) {
+          slots.clear();
+          d++;
+          continue;
+        }
 
-      if (values[slot] != 0 || !all_different_from(slots, slot)) {
-        slots.clear();
-        d++;
-        continue;
+        slots.push_back(slot);
       }
 
-      slots.push_back(slot);
+      G[hash(key(it[bucket[0] - 1])) % M] = maybe_seed{true, d};
+      for (std::size_t i = 0; i < bsize; ++i)
+        values[slots[i]] = bucket[i];
+    } else if (bsize == 1) {
+      G[hash(key(it[bucket[0] - 1])) % M] = maybe_seed{false, bucket[0] - 1};
     }
-
-    G[hash(key(it[bucket[0] - 1])) % M] = d;
-    for (std::size_t i = 0; i < bsize; ++i)
-      values[slots[i]] = bucket[i];
   }
 
-  // Only buckets with 1 item remain. Process them more quickly by directly
-  // placing them into a free slot. Use a negative value of d to indicate
-  // this.
-  cvector<int64_t, M> freelist;
-
-  for (std::size_t i = 0; i < M; ++i)
-    if (values[i] == 0)
-      freelist.push_back(i);
-
-  for (std::size_t i = b; i < M; ++i) {
-    auto &bucket = buckets[i];
-    if (bucket.size() == 0)
-      break;
-    auto slot = freelist.back();
-    freelist.pop_back();
-    // We subtract one to ensure it's negative even if the zeroeth slot was
-    // used.
-    G[hash(key(it[bucket[0] - 1])) % M] = -slot - 1;
-    values[slot] = bucket[0];
-  }
   for (std::size_t i = 0; i < M; ++i)
     if (values[i])
       values[i]--;
